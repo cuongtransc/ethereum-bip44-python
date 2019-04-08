@@ -1,26 +1,26 @@
 """This submodule provides the PublicKey, PrivateKey, and Signature classes.
 It also provides HDPublicKey and HDPrivateKey classes for working with HD
 wallets."""
-import math
-import base58
 import base64
 import hashlib
 import hmac
-from mnemonic.mnemonic import Mnemonic
+import math
 import random
-from two1.bitcoin.utils import bytes_to_str
-from two1.bitcoin.utils import address_to_key_hash
-from two1.bitcoin.utils import rand_bytes
+
+from Crypto.Hash import keccak
+from eth_utils import encode_hex
+
+import base58
+from mnemonic.mnemonic import Mnemonic
+from two1.bitcoin.utils import address_to_key_hash, bytes_to_str, rand_bytes
+from two1.crypto.ecdsa import ECPointAffine, secp256k1
 from two1.crypto.ecdsa_base import Point
-from two1.crypto.ecdsa import ECPointAffine
-from two1.crypto.ecdsa import secp256k1
 
 bitcoin_curve = secp256k1()
 
-from eth_utils import encode_hex
 
-from Crypto.Hash import keccak
-sha3_256 = lambda x: keccak.new(digest_bits=256, data=x)
+def sha3_256(x):
+    return keccak.new(digest_bits=256, data=x)
 
 
 def sha3(seed):
@@ -592,13 +592,15 @@ class PublicKey(PublicKeyBase):
         if key_type == 0x04:
             # Uncompressed
             if key_bytes_len != 65:
-                raise ValueError("key_bytes must be exactly 65 bytes long when uncompressed.")
+                raise ValueError(
+                    "key_bytes must be exactly 65 bytes long when uncompressed.")
 
             x = int.from_bytes(b[1:33], 'big')
             y = int.from_bytes(b[33:65], 'big')
         elif key_type == 0x02 or key_type == 0x03:
             if key_bytes_len != 33:
-                raise ValueError("key_bytes must be exactly 33 bytes long when compressed.")
+                raise ValueError(
+                    "key_bytes must be exactly 33 bytes long when compressed.")
 
             x = int.from_bytes(b[1:33], 'big')
             ys = bitcoin_curve.y_from_x(x)
@@ -677,12 +679,14 @@ class PublicKey(PublicKeyBase):
         compressed = ((magic - 27) & 0x4) != 0
 
         # Build the message that was signed
-        msg = b"\x18Bitcoin Signed Message:\n" + bytes([len(message)]) + message
+        msg = b"\x18Bitcoin Signed Message:\n" + \
+            bytes([len(message)]) + message
         msg_hash = hashlib.sha256(msg).digest()
 
         derived_public_key = PublicKey.from_signature(msg_hash, sig)
         if derived_public_key is None:
-            raise ValueError("Could not recover public key from the provided signature.")
+            raise ValueError(
+                "Could not recover public key from the provided signature.")
 
         ver, h160 = address_to_key_hash(address)
         hash160 = derived_public_key.hash160(compressed)
@@ -694,7 +698,8 @@ class PublicKey(PublicKeyBase):
     def __init__(self, x, y):
         p = ECPointAffine(bitcoin_curve, x, y)
         if not bitcoin_curve.is_on_curve(p):
-            raise ValueError("The provided (x, y) are not on the secp256k1 curve.")
+            raise ValueError(
+                "The provided (x, y) are not on the secp256k1 curve.")
 
         self.point = p
 
@@ -964,7 +969,8 @@ class Signature(object):
         r, s = self._canonicalize()
 
         total_length = 6 + len(r) + len(s)
-        der = bytes([0x30, total_length - 2, 0x02, len(r)]) + r + bytes([0x02, len(s)]) + s
+        der = bytes([0x30, total_length - 2, 0x02, len(r)]) + \
+            r + bytes([0x02, len(s)]) + s
         return der
 
     def to_hex(self):
@@ -1061,7 +1067,8 @@ class HDKey(object):
                               parent_fingerprint=parent_fingerprint)
         elif version == HDPublicKey.MAINNET_VERSION or version == HDPublicKey.TESTNET_VERSION:
             if key_bytes[0] != 0x02 and key_bytes[0] != 0x03:
-                raise ValueError("First byte of public key must be 0x02 or 0x03!")
+                raise ValueError(
+                    "First byte of public key must be 0x02 or 0x03!")
 
             public_key = PublicKey.from_bytes(key_bytes)
             rv = HDPublicKey(x=public_key.point.x,
@@ -1101,7 +1108,8 @@ class HDKey(object):
             if root_key.master:
                 p = p[1:]
             else:
-                raise ValueError("root_key must be a master key if 'm' is the first element of the path.")
+                raise ValueError(
+                    "root_key must be a master key if 'm' is the first element of the path.")
 
         keys = [root_key]
         for i in p:
@@ -1218,7 +1226,8 @@ class HDKey(object):
 
     def _serialize(self, testnet=False):
         version = self.TESTNET_VERSION if testnet else self.MAINNET_VERSION
-        key_bytes = self._key.compressed_bytes if isinstance(self, HDPublicKey) else b'\x00' + bytes(self._key)
+        key_bytes = self._key.compressed_bytes if isinstance(
+            self, HDPublicKey) else b'\x00' + bytes(self._key)
         return (version.to_bytes(length=4, byteorder='big') +
                 bytes([self.depth]) +
                 self.parent_fingerprint +
@@ -1321,8 +1330,8 @@ class HDPrivateKey(HDKey, PrivateKeyBase):
             HDPrivateKey: the master private key.
         """
         S = get_bytes(seed)
-        I = hmac.new(b"Bitcoin seed", S, hashlib.sha512).digest()
-        Il, Ir = I[:32], I[32:]
+        IV = hmac.new(b"Bitcoin seed", S, hashlib.sha512).digest()
+        Il, Ir = IV[:32], IV[32:]
         parse_Il = int.from_bytes(Il, 'big')
         if parse_Il == 0 or parse_Il >= bitcoin_curve.n:
             raise ValueError("Bad seed, resulting in invalid key!")
@@ -1343,12 +1352,14 @@ class HDPrivateKey(HDKey, PrivateKeyBase):
 
         hmac_key = parent_key.chain_code
         if i & 0x80000000:
-            hmac_data = b'\x00' + bytes(parent_key._key) + i.to_bytes(length=4, byteorder='big')
+            hmac_data = b'\x00' + \
+                bytes(parent_key._key) + i.to_bytes(length=4, byteorder='big')
         else:
-            hmac_data = parent_key.public_key.compressed_bytes + i.to_bytes(length=4, byteorder='big')
+            hmac_data = parent_key.public_key.compressed_bytes + \
+                i.to_bytes(length=4, byteorder='big')
 
-        I = hmac.new(hmac_key, hmac_data, hashlib.sha512).digest()
-        Il, Ir = I[:32], I[32:]
+        IV = hmac.new(hmac_key, hmac_data, hashlib.sha512).digest()
+        Il, Ir = IV[:32], IV[32:]
 
         parse_Il = int.from_bytes(Il, 'big')
         if parse_Il >= bitcoin_curve.n:
@@ -1522,12 +1533,15 @@ class HDPublicKey(HDKey, PublicKeyBase):
             return HDPrivateKey.from_parent(parent_key, i).public_key
         elif isinstance(parent_key, HDPublicKey):
             if i & 0x80000000:
-                raise ValueError("Can't generate a hardened child key from a parent public key.")
+                raise ValueError(
+                    "Can't generate a hardened child key from a parent public key.")
             else:
-                I = hmac.new(parent_key.chain_code,
-                             parent_key.compressed_bytes + i.to_bytes(length=4, byteorder='big'),
-                             hashlib.sha512).digest()
-                Il, Ir = I[:32], I[32:]
+                IV = hmac.new(
+                    parent_key.chain_code,
+                    parent_key.compressed_bytes +
+                    i.to_bytes(length=4, byteorder='big'),
+                    hashlib.sha512).digest()
+                Il, Ir = IV[:32], IV[32:]
                 parse_Il = int.from_bytes(Il, 'big')
                 if parse_Il >= bitcoin_curve.n:
                     return None
@@ -1545,7 +1559,8 @@ class HDPublicKey(HDKey, PublicKeyBase):
                                    depth=child_depth,
                                    parent_fingerprint=parent_key.fingerprint)
         else:
-            raise TypeError("parent_key must be either a HDPrivateKey or HDPublicKey object")
+            raise TypeError(
+                "parent_key must be either a HDPrivateKey or HDPublicKey object")
 
     def __init__(self, x, y, chain_code, index, depth,
                  parent_fingerprint=b'\x00\x00\x00\x00'):
